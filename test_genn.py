@@ -11,8 +11,11 @@ lif_params = {"C": 0.2, "TauM": 20.0, "Vrest": -65.0, "Vreset": -70.0,
               "Vthresh": -50.0, "Ioffset": 0.0, "TauRefrac": 5.0}
 
 
-lif_init = {"V": init_var("Normal", {"mean": -0.0680901, "sd": 0.0057296}),
+lif_init = {"V": init_var("Normal", {"mean": -68.0901, "sd": 5.7296}),
             "RefracTime": 0.0}
+
+
+
 
 
 exc_ratio = 0.8
@@ -27,6 +30,10 @@ L = 6000.0
 
 n_side_E = int(np.ceil(np.sqrt(exc_num)))
 n_side_I = int(np.ceil(np.sqrt(inh_num)))
+
+EE_dist = L/n_side_E
+
+
 
 
 
@@ -78,12 +85,14 @@ fixed_number_post_resize = create_sparse_connect_init_snippet(
 
 
 
-
 exc_pop = model.add_neuron_population("E", exc_num, "LIF", lif_params, lif_init)
 inh_pop = model.add_neuron_population("I", inh_num, "LIF", lif_params, lif_init)
 
 exc_pop.spike_recording_enabled = True
 inh_pop.spike_recording_enabled = True
+
+
+conduction_delay = 0.2 #mm/ms
 
 exc_synapse_init = {"g": 0.001}
 inh_synapse_init = {"g": -0.01}
@@ -99,6 +108,7 @@ inh_post_syn_params = {"tau": 5.0, "E": -80.0}
 EE_syn_pop = model.add_synapse_population("EE", "SPARSE",
     exc_pop, exc_pop,
     init_weight_update("StaticPulseConstantWeight", exc_synapse_init),
+    #init_weight_update("StaticPulseDendriticDelay", EE_synapse_init),
     init_postsynaptic("ExpCond", exc_post_syn_params, var_refs={"V": create_var_ref(exc_pop, "V")}),
     init_sparse_connectivity(fixed_number_post, {"num": int(K*exc_ratio), "sigma_space": sigma/L*n_side_E, "grid_num_x": int(n_side_E)}))
 
