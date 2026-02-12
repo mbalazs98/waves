@@ -26,30 +26,8 @@ StaticPulseDendriticDelayConstantWeight = create_weight_update_model(
         """
         addToPostDelay(g, d);""")
 
-fixed_number_post = create_sparse_connect_init_snippet(
-    "fixed_number_post",
-    params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int")],
-    row_build_code=
-        """
-        const int xPre = id_pre % grid_num_x;
-        const int yPre = id_pre / grid_num_x;
-        int count = num;
-        while(count > 0) {
-            const int distanceX = (int)round(gennrand_normal() * sigma_space);
-            const int distanceY = (int)round(gennrand_normal() * sigma_space);
-            int xPost = xPre + distanceX;
-            int yPost = yPre + distanceY;
-            if((distanceX == 0 && distanceY == 0) || (xPost < 0 || xPost >= grid_num_x || yPost < 0 || yPost >= grid_num_x)){
-                continue;
-            }
-            count--;
-            const int id_post = (yPost * grid_num_x) + xPost;
-            addSynapse(id_post);
-        }
-        """,   
-        calc_max_row_len_func=lambda num_pre, num_post, pars: pars["num"])
 
-fixed_number_post_resize = create_sparse_connect_init_snippet(
+fixed_number_post = create_sparse_connect_init_snippet(
     "fixed_number_post_resize",
     params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     row_build_code=
@@ -132,30 +110,22 @@ class TopoGraphic(Connectivity):
         self.num = num
         self.sigma_space = sigma_space
         self.grid_num_x = grid_num_x
+        if grid_num_x2 is None:
+            grid_num_x2 = grid_num_x
         self.grid_num_x2 = grid_num_x2
-        self.use_resize = grid_num_x2 is not None
 
     def connect(self, source: Population, target: Population):
         pass
 
     def get_snippet(self, connection: Connection,
                     supported_matrix_type: SupportedMatrixType) -> ConnectivitySnippet:
-        if self.use_resize:
-            snippet = fixed_number_post_resize
-            params = {
-                "num": self.num,
-                "sigma_space": self.sigma_space,
-                "grid_num_x": self.grid_num_x,
-                "grid_num_x2": self.grid_num_x2
-            }
-        else:
-            snippet = fixed_number_post
-            params = {
-                "num": self.num,
-                "sigma_space": self.sigma_space,
-                "grid_num_x": self.grid_num_x
-            }
-
+        snippet = fixed_number_post
+        params = {
+            "num": self.num,
+            "sigma_space": self.sigma_space,
+            "grid_num_x": self.grid_num_x,
+            "grid_num_x2": self.grid_num_x2
+        }
         conn_init = init_sparse_connectivity(snippet, params)
 
         
