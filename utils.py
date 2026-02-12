@@ -1,17 +1,17 @@
 from pygenn import (create_sparse_connect_init_snippet, create_var_init_snippet,  create_weight_update_model,
                     init_sparse_connectivity)
 
-from __future__ import annotations
 
-from pygenn import Optional, SynapseMatrixType
+from typing import Optional
+from pygenn import SynapseMatrixType
 from typing import TYPE_CHECKING
 from ml_genn.connectivity import Connectivity
 from ml_genn.utils.snippet import ConnectivitySnippet
-from ..utils.value import InitValue
-
+from ml_genn.utils.value import InitValue
+TYPE_CHECKING = True
 if TYPE_CHECKING:
-    from .. import Connection, Population
-    from ..compilers.compiler import SupportedMatrixType
+    from ml_genn import Connection, Population
+    from ml_genn.compilers.compiler import SupportedMatrixType
 
 from pygenn import (create_sparse_connect_init_snippet, init_sparse_connectivity)
 
@@ -118,5 +118,4 @@ class TopoGraphic(Connectivity):
             snippet=conn_init,
             matrix_type=SynapseMatrixType.SPARSE,
             weight=self.weight,
-            delay=self.delay,
-            conn_init_params=params)
+            delay=self.delay)
