@@ -53,21 +53,6 @@ fixed_number_post = create_sparse_connect_init_snippet(
 
 
 calc_dist = create_var_init_snippet(
-    "calc_dist",
-    
-    params=[("delay", "float"),("grid_num_x", "unsigned int")],
-    var_init_code=
-        """
-        const float xPre = id_pre % grid_num_x;
-        const float yPre = id_pre / grid_num_x;
-        const float xPost = id_post % grid_num_x;
-        const float yPost = id_post / grid_num_x;
-        float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
-        value = dist * delay;
-        """
-    )
-
-calc_dist_resize = create_var_init_snippet(
     "calc_dist_resize",
     
     params=[("delay", "float"),("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
