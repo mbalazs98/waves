@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 from pygenn import (create_sparse_connect_init_snippet, init_sparse_connectivity)
 
+from ml_genn.initializers import Wrapper
+
 
 
 StaticPulseDendriticDelayConstantWeight = create_weight_update_model(
@@ -32,15 +34,15 @@ fixed_number_post = create_sparse_connect_init_snippet(
     params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     row_build_code=
         """
-        const float ratio = (float)grid_num_x2 / (float)grid_num_x;
-        const int xPre = (id_pre % grid_num_x) * ratio;
-        const int yPre = (id_pre / grid_num_x) * ratio;
+        const float ratio = (float)(grid_num_x2-1) / (float)(grid_num_x-1);
+        const float xPre = (id_pre % grid_num_x) * ratio;
+        const float yPre = (id_pre / grid_num_x) * ratio;
         int count = num;
         while(count > 0) {
-            const int distanceX = (int)round(gennrand_normal() * sigma_space);
-            const int distanceY = (int)round(gennrand_normal() * sigma_space);
-            int xPost = xPre + distanceX;
-            int yPost = yPre + distanceY;
+            const float distanceX = (float)gennrand_normal() * sigma_space;
+            const float distanceY = (float)gennrand_normal() * sigma_space;
+            int xPost = (int)round(xPre + distanceX);
+            int yPost = (int)round(yPre + distanceY);
             if((xPost < 0 || xPost >= grid_num_x2 || yPost < 0 || yPost >= grid_num_x2)){
                 continue;
             }
@@ -53,18 +55,18 @@ fixed_number_post = create_sparse_connect_init_snippet(
 
 
 calc_dist = create_var_init_snippet(
-    "calc_dist_resize",
+    "calc_dist",
     
     params=[("delay", "float"),("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     var_init_code=
         """
-        const float ratio = (float)grid_num_x2 / (float)grid_num_x;
-        const int xPre = (id_pre % grid_num_x) * ratio;
-        const int yPre = (id_pre / grid_num_x) * ratio;
+        const float ratio = (float)(grid_num_x2 -1 ) / (float)(grid_num_x-1);
+        const float xPre = (id_pre % grid_num_x) * ratio;
+        const float yPre = (id_pre / grid_num_x) * ratio;
         const float xPost = id_post % grid_num_x2;
         const float yPost = id_post / grid_num_x2;
         float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
-        value = dist * delay;
+        delays = dist * delay;
         """
     )
 
@@ -88,16 +90,19 @@ class TopoGraphic(Connectivity):
         delay:          Connection delays
     """
     def __init__(self, weight: InitValue, num: int, sigma_space: float, 
-                 grid_num_x: int, grid_num_x2: Optional[int] = None, 
+                 grid_num_x: int, grid_num_x2: Optional[int] = None, spatial_delay: bool = True, cond_vel: Optional[float] = None, 
                  delay: InitValue = 0):
         super(TopoGraphic, self).__init__(weight, delay)
         
-        self.num = num
+        self.num = int(num)
         self.sigma_space = sigma_space
         self.grid_num_x = grid_num_x
         if grid_num_x2 is None:
             grid_num_x2 = grid_num_x
         self.grid_num_x2 = grid_num_x2
+        self.spatial_delay = spatial_delay
+        self.cond_vel = cond_vel
+        print(self.cond_vel)
 
     def connect(self, source: Population, target: Population):
         pass
@@ -113,9 +118,18 @@ class TopoGraphic(Connectivity):
         }
         conn_init = init_sparse_connectivity(snippet, params)
 
-        
+        if self.spatial_delay:
+            delay_snippet = calc_dist
+            delay_params = {
+                "delay": self.cond_vel,
+                "grid_num_x": self.grid_num_x,
+                "grid_num_x2": self.grid_num_x2
+            }
+            delay_init = Wrapper(delay_snippet, delay_params, {"delays": self.delay})
+        else:
+            delay_init = self.delay
         return ConnectivitySnippet(
             snippet=conn_init,
             matrix_type=SynapseMatrixType.SPARSE,
             weight=self.weight,
-            delay=self.delay)
+            delay=delay_init)
