@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 
 from pygenn import (create_sparse_connect_init_snippet, init_sparse_connectivity)
 
-from ml_genn.initializers import Wrapper
 
-
+from ml_genn.initializers.initializer import Initializer
+from ml_genn.utils.snippet import ConstantValueDescriptor, InitializerSnippet
 
 StaticPulseDendriticDelayConstantWeight = create_weight_update_model(
     "StaticPulseDendriticDelayConstantWeight",
@@ -66,11 +66,36 @@ calc_dist = create_var_init_snippet(
         const float xPost = id_post % grid_num_x2;
         const float yPost = id_post / grid_num_x2;
         float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
-        delays = dist * delay;
+        value = dist * delay;
         """
     )
 
 
+
+class SpatialDelay(Initializer):
+    """Initialize by drawing from a normal distribution based on spatial distance between neurons.
+    
+    Args:
+        delay:          Delay value
+        grid_num_x:     Number of neurons in a column/row of source population.
+        grid_num_x2:    Number of neurons in a column/row of target population.
+    """
+    delay = ConstantValueDescriptor()
+    grid_num_x = ConstantValueDescriptor()
+    grid_num_x2 = ConstantValueDescriptor()
+
+    def __init__(self, delay: float = 0.0, grid_num_x: int = 0.0, grid_num_x2: int = 0.0):
+        super(SpatialDelay, self).__init__()
+
+        self.delay = delay
+        self.grid_num_x = grid_num_x
+        self.grid_num_x2 = grid_num_x2
+
+    def get_snippet(self):
+        return InitializerSnippet(snippet=calc_dist, param_vals={"delay": self.delay, "grid_num_x": self.grid_num_x, "grid_num_x2": self.grid_num_x2})
+
+    def __repr__(self):
+        return f"(SpatialDelay) Delay: {self.delay}, Grid Num X: {self.grid_num_x}, Grid Num X2: {self.grid_num_x2}"
 
 class TopoGraphic(Connectivity):
     """Topographic connectivity with fixed number of post-synaptic connections.
@@ -90,7 +115,7 @@ class TopoGraphic(Connectivity):
         delay:          Connection delays
     """
     def __init__(self, weight: InitValue, num: int, sigma_space: float, 
-                 grid_num_x: int, grid_num_x2: Optional[int] = None, spatial_delay: bool = True, cond_vel: Optional[float] = None, 
+                 grid_num_x: int, grid_num_x2: Optional[int] = None,
                  delay: InitValue = 0):
         super(TopoGraphic, self).__init__(weight, delay)
         
@@ -100,9 +125,6 @@ class TopoGraphic(Connectivity):
         if grid_num_x2 is None:
             grid_num_x2 = grid_num_x
         self.grid_num_x2 = grid_num_x2
-        self.spatial_delay = spatial_delay
-        self.cond_vel = cond_vel
-        print(self.cond_vel)
 
     def connect(self, source: Population, target: Population):
         pass
@@ -118,18 +140,8 @@ class TopoGraphic(Connectivity):
         }
         conn_init = init_sparse_connectivity(snippet, params)
 
-        if self.spatial_delay:
-            delay_snippet = calc_dist
-            delay_params = {
-                "delay": self.cond_vel,
-                "grid_num_x": self.grid_num_x,
-                "grid_num_x2": self.grid_num_x2
-            }
-            delay_init = Wrapper(delay_snippet, delay_params, {"delays": self.delay})
-        else:
-            delay_init = self.delay
         return ConnectivitySnippet(
             snippet=conn_init,
             matrix_type=SynapseMatrixType.SPARSE,
             weight=self.weight,
-            delay=delay_init)
+            delay=self.delay)
