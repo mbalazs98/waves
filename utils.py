@@ -30,7 +30,7 @@ StaticPulseDendriticDelayConstantWeight = create_weight_update_model(
 
 
 fixed_number_post = create_sparse_connect_init_snippet(
-    "fixed_number_post_resize",
+    "fixed_number_post",
     params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     row_build_code=
         """
@@ -57,7 +57,7 @@ fixed_number_post = create_sparse_connect_init_snippet(
 calc_dist = create_var_init_snippet(
     "calc_dist",
     
-    params=[("delay", "float"),("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
+    params=[("delay_vel", "float"),("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     var_init_code=
         """
         const float ratio = (float)(grid_num_x2 -1 ) / (float)(grid_num_x-1);
@@ -66,7 +66,7 @@ calc_dist = create_var_init_snippet(
         const float xPost = id_post % grid_num_x2;
         const float yPost = id_post / grid_num_x2;
         float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
-        value = dist * delay;
+        value = dist * delay_vel;
         """
     )
 
@@ -76,26 +76,26 @@ class SpatialDelay(Initializer):
     """Initialize by drawing from a normal distribution based on spatial distance between neurons.
     
     Args:
-        delay:          Delay value
+        delay_vel:      Delay value
         grid_num_x:     Number of neurons in a column/row of source population.
         grid_num_x2:    Number of neurons in a column/row of target population.
     """
-    delay = ConstantValueDescriptor()
+    delay_vel = ConstantValueDescriptor()
     grid_num_x = ConstantValueDescriptor()
     grid_num_x2 = ConstantValueDescriptor()
 
-    def __init__(self, delay: float = 0.0, grid_num_x: int = 0.0, grid_num_x2: int = 0.0):
+    def __init__(self, delay_vel: float = 0.0, grid_num_x: int = 0.0, grid_num_x2: int = 0.0):
         super(SpatialDelay, self).__init__()
 
-        self.delay = delay
+        self.delay_vel = delay_vel
         self.grid_num_x = grid_num_x
         self.grid_num_x2 = grid_num_x2
 
     def get_snippet(self):
-        return InitializerSnippet(snippet=calc_dist, param_vals={"delay": self.delay, "grid_num_x": self.grid_num_x, "grid_num_x2": self.grid_num_x2})
+        return InitializerSnippet(snippet=calc_dist, param_vals={"delay_vel": self.delay_vel, "grid_num_x": self.grid_num_x, "grid_num_x2": self.grid_num_x2})
 
     def __repr__(self):
-        return f"(SpatialDelay) Delay: {self.delay}, Grid Num X: {self.grid_num_x}, Grid Num X2: {self.grid_num_x2}"
+        return f"(SpatialDelay) Delay Vel: {self.delay_vel}, Grid Num X: {self.grid_num_x}, Grid Num X2: {self.grid_num_x2}"
 
 class TopoGraphic(Connectivity):
     """Topographic connectivity with fixed number of post-synaptic connections.
@@ -139,7 +139,6 @@ class TopoGraphic(Connectivity):
             "grid_num_x2": self.grid_num_x2
         }
         conn_init = init_sparse_connectivity(snippet, params)
-
         return ConnectivitySnippet(
             snippet=conn_init,
             matrix_type=SynapseMatrixType.SPARSE,
