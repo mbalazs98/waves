@@ -9,14 +9,11 @@ from pygenn import (GeNNModel, VarLocation, init_var,
 
 # Parameters
 TIMESTEP = 1.0
-NUM_NEURONS = 1_012_500
-
-RESET_VOLTAGE = -60.0
-THRESHOHOLD_VOLTAGE = -50.0
+NUM_NEURONS = 800000#1_012_500
 
 K = 3000
 
-PROBABILITY_CONNECTION = K/NUM_NEURONS#0.1
+PROBABILITY_CONNECTION = K/NUM_NEURONS
 
 EXCITATORY_INHIBITORY_RATIO = 4.0
 
@@ -26,17 +23,10 @@ NUM_INHIBITORY = NUM_NEURONS - NUM_EXCITATORY
 SCALE = (4000.0 / NUM_NEURONS) * (0.02 / PROBABILITY_CONNECTION)
 EXCITATORY_WEIGHT = 4.0E-3 * SCALE / 10
 INHIBITORY_WEIGHT = -51.0E-3 * SCALE / 10
-
 model = GeNNModel("float", "va_benchmark")
 model.dt = TIMESTEP
 model.default_narrow_sparse_ind_enabled = True
 fixed_prob = {"prob": PROBABILITY_CONNECTION}
-
-lif_params = {"C": 1.0, "TauM": 20.0, "Vrest": -49.0, "Vreset": RESET_VOLTAGE,
-              "Vthresh": THRESHOHOLD_VOLTAGE, "Ioffset": 0.0, "TauRefrac": 5.0}
-
-lif_init = {"V": init_var("Uniform", {"min": RESET_VOLTAGE, "max": THRESHOHOLD_VOLTAGE}),
-            "RefracTime": 0.0}
 
 lif_init = {"V": init_var("Uniform", {"min": 0, "max": 1}), "RefracTime": 0.0}
 lif_params = {"C": 1.0, "TauM": 20.0, "Vrest": 0.0, "Vreset": 0.0, "Vthresh" : 1.0,
@@ -50,8 +40,6 @@ poisson_model = create_neuron_model(
 )
 poisson_init = {"rate": 20.0}
 
-'''lif_init = {"V": init_var("Normal", {"mean": -68.0901, "sd": 5.7296}),
-            "RefracTime": 0.0}'''
 
 excitatory_pop = model.add_neuron_population("E", NUM_EXCITATORY, "LIF", lif_params, lif_init)
 inhibitory_pop = model.add_neuron_population("I", NUM_INHIBITORY, "LIF", lif_params, lif_init)
@@ -185,8 +173,6 @@ EI_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"
 II_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_I)})})
 IE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, {"d": init_var(calc_dist_resize, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)})})
 
-#excitatory_weight_init = init_weight_update("StaticPulseConstantWeight", {"g": EXCITATORY_WEIGHT})
-#inhibitory_weight_init = init_weight_update("StaticPulseConstantWeight", {"g": INHIBITORY_WEIGHT})
 excitatory_postsynaptic_init = init_postsynaptic("ExpCurr", {"tau": 5.0})
 inhibitory_postsynaptic_init = init_postsynaptic("ExpCurr", {"tau": 10.0})
 
@@ -196,7 +182,7 @@ start_loc_y = np.random.randint(0, n_side_E-int(np.sqrt(input_num)))
 
 InputE_syn_pop = model.add_synapse_population("InputE", "SPARSE",
     input_pop1, excitatory_pop,
-    init_weight_update("StaticPulseConstantWeight", {"g": 10.0}),
+    init_weight_update("StaticPulseConstantWeight", {"g": 0.0}),
     init_postsynaptic("ExpCurr", {"tau": 5.0}),
     init_sparse_connectivity(input_number_post, {"num": int(input_num), "start_loc_x": start_loc_x, "start_loc_y": start_loc_y, "grid_num_x": int(n_side_E)}))
 
@@ -273,7 +259,7 @@ model.pull_recording_buffers_from_device()
 
 exc_spike_times, exc_spike_ids = excitatory_pop.spike_recording_data[0]
 inh_spike_times, inh_spike_ids = inhibitory_pop.spike_recording_data[0]
-
+print(len(exc_spike_times))
 
 fig, axes = plt.subplots(3, sharex=True, figsize=(20, 10))
 
@@ -301,75 +287,3 @@ axes[2].set_ylabel("Inhibitory rate [Hz]")
 axes[2].set_xlabel("Time [ms]");
 
 plt.savefig("wave.png")
-
-
-side = int(np.sqrt(NUM_EXCITATORY))  # should be 900
-print(side)  # 900
-
-crop = side // 6          # 900 // 6 = 150
-r0, r1 = crop, side - crop
-c0, c1 = crop, side - crop
-
-cropped_side = r1 - r0    # should be 600
-
-
-exc_spike_times = np.array(exc_spike_times)  # shape (n_spikes,)
-exc_spike_ids   = np.array(exc_spike_ids)    # shape (n_spikes,)
-
-t_min = exc_spike_times.min()
-t_max = exc_spike_times.max()
-
-dt = 10.0  # ms per frame (adjust to taste)
-time_bins = np.arange(t_min, t_max + dt, dt)
-n_frames = len(time_bins) - 1
-
-frames = np.zeros((n_frames, cropped_side, cropped_side), dtype=np.float32)
-
-
-# Find which frame each spike belongs to
-frame_indices = np.digitize(exc_spike_times, time_bins) - 1
-
-valid = (frame_indices >= 0) & (frame_indices < n_frames)
-frame_indices = frame_indices[valid]
-ids = exc_spike_ids[valid]
-
-rows = ids // side
-cols = ids % side
-
-# Keep only spikes inside central region
-inside = (rows >= r0) & (rows < r1) & (cols >= c0) & (cols < c1)
-
-rows = rows[inside] - r0   # shift so cropped grid starts at 0
-cols = cols[inside] - c0
-frame_indices = frame_indices[inside]
-
-# Accumulate spikes into frames
-for f, r, c in zip(frame_indices, rows, cols):
-    frames[f, r, c] += 1
-
-# Log scale helps a lot with spike data
-frames = np.log1p(frames)
-
-# Normalize to [0, 1]
-frames /= frames.max()
-
-import matplotlib.pyplot as plt
-import imageio
-
-gif_path = "spiking_activity.gif"
-images = []
-
-for i in range(n_frames):
-    print(i)
-    fig, ax = plt.subplots(figsize=(3, 3))
-    ax.imshow(frames[i], cmap="hot", vmin=0, vmax=1)
-    ax.set_title(f"Time: {time_bins[i]:.1f}–{time_bins[i+1]:.1f} ms")
-    ax.axis("off")
-
-    fig.canvas.draw()
-    image = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
-    images.append(image)
-
-    plt.close(fig)
-
-imageio.mimsave(gif_path, images, duration=0.1, loop=10 )  # seconds per frame
