@@ -9,24 +9,29 @@ from pygenn import (GeNNModel, VarLocation, init_var,
 
 # Parameters
 TIMESTEP = 1.0
-NUM_NEURONS = 800000#1_012_500
+NUM_NEURONS = 1_012_500
+
 
 K = 3000
 
-PROBABILITY_CONNECTION = K/NUM_NEURONS
+
 
 EXCITATORY_INHIBITORY_RATIO = 4.0
-
 NUM_EXCITATORY = int(round((NUM_NEURONS * EXCITATORY_INHIBITORY_RATIO) / (1.0 + EXCITATORY_INHIBITORY_RATIO)))
 
 NUM_INHIBITORY = NUM_NEURONS - NUM_EXCITATORY
-SCALE = (4000.0 / NUM_NEURONS) * (0.02 / PROBABILITY_CONNECTION)
-EXCITATORY_WEIGHT = 4.0E-3 * SCALE / 10
-INHIBITORY_WEIGHT = -51.0E-3 * SCALE / 10
+
+PROBABILITY_CONNECTION_E = K*(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO))/NUM_EXCITATORY#0.1
+PROBABILITY_CONNECTION_I = K*(1-(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)))/NUM_INHIBITORY#0.1
+
+SCALE_E = (4000.0 / NUM_NEURONS) * (0.02 / (PROBABILITY_CONNECTION_E))
+SCALE_I = (4000.0 / NUM_NEURONS) * (0.02 / (PROBABILITY_CONNECTION_I))
+EXCITATORY_WEIGHT = 4.0E-3 * SCALE_E / 10
+INHIBITORY_WEIGHT = -51.0E-3 * SCALE_I / 10
 model = GeNNModel("float", "va_benchmark")
 model.dt = TIMESTEP
 model.default_narrow_sparse_ind_enabled = True
-fixed_prob = {"prob": PROBABILITY_CONNECTION}
+
 
 lif_init = {"V": init_var("Uniform", {"min": 0, "max": 1}), "RefracTime": 0.0}
 lif_params = {"C": 1.0, "TauM": 20.0, "Vrest": 0.0, "Vreset": 0.0, "Vthresh" : 1.0,
@@ -39,8 +44,6 @@ poisson_model = create_neuron_model(
     vars= [("rate", "scalar")]
 )
 poisson_init = {"rate": 20.0}
-
-
 excitatory_pop = model.add_neuron_population("E", NUM_EXCITATORY, "LIF", lif_params, lif_init)
 inhibitory_pop = model.add_neuron_population("I", NUM_INHIBITORY, "LIF", lif_params, lif_init)
 
@@ -77,31 +80,9 @@ input_number_post = create_sparse_connect_init_snippet(
         """,   
         calc_max_col_len_func=lambda num_pre, num_post, pars: pars["num"])
 
-fixed_number_post = create_sparse_connect_init_snippet(
-    "fixed_number_post",
-    params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int")],
-    row_build_code=
-        """
-        const int xPre = id_pre % grid_num_x;
-        const int yPre = id_pre / grid_num_x;
-        int count = num;
-        while(count > 0) {
-            const int distanceX = (int)round(gennrand_normal() * sigma_space);
-            const int distanceY = (int)round(gennrand_normal() * sigma_space);
-            int xPost = xPre + distanceX;
-            int yPost = yPre + distanceY;
-            if((distanceX == 0 && distanceY == 0) || (xPost < 0 || xPost >= grid_num_x || yPost < 0 || yPost >= grid_num_x)){
-                continue;
-            }
-            count--;
-            const int id_post = (yPost * grid_num_x) + xPost;
-            addSynapse(id_post);
-        }
-        """,   
-        calc_max_row_len_func=lambda num_pre, num_post, pars: pars["num"])
 
-fixed_number_post_resize = create_sparse_connect_init_snippet(
-    "fixed_number_post_resize",
+fixed_number_post= create_sparse_connect_init_snippet(
+    "fixed_number_post",
     params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     row_build_code=
         """
@@ -114,9 +95,12 @@ fixed_number_post_resize = create_sparse_connect_init_snippet(
             const float distanceY = gennrand_normal() * sigma_space;
             int xPost = (int)round(xPre + distanceX);
             int yPost = (int)round(yPre + distanceY);
-            if((xPost < 0 || xPost >= grid_num_x2 || yPost < 0 || yPost >= grid_num_x2)){
-                continue;
-            }
+            // periodic wrapping
+            while(xPost < 0) xPost += grid_num_x2;
+            while(xPost >= grid_num_x2) xPost -= grid_num_x2;
+            while(xPost < 0) xPost += grid_num_x2;
+            while(yPost < 0) yPost += grid_num_x2;
+            while(yPost >= grid_num_x2) yPost -= grid_num_x2;
             count--;
             const int id_post = (yPost * grid_num_x2) + xPost;
             addSynapse(id_post);
@@ -128,21 +112,6 @@ fixed_number_post_resize = create_sparse_connect_init_snippet(
 calc_dist = create_var_init_snippet(
     "calc_dist",
     
-    params=[("delay", "float"),("grid_num_x", "unsigned int")],
-    var_init_code=
-        """
-        const float xPre = id_pre % grid_num_x;
-        const float yPre = id_pre / grid_num_x;
-        const float xPost = id_post % grid_num_x;
-        const float yPost = id_post / grid_num_x;
-        float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
-        value = dist * delay;
-        """
-    )
-
-calc_dist_resize = create_var_init_snippet(
-    "calc_dist_resize",
-    
     params=[("delay", "float"),("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     var_init_code=
         """
@@ -151,7 +120,18 @@ calc_dist_resize = create_var_init_snippet(
         const float yPre = (id_pre / grid_num_x) * ratio;
         const float xPost = id_post % grid_num_x2;
         const float yPost = id_post / grid_num_x2;
-        float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
+        float dx = fabs(xPre - xPost);
+        float dy = fabs(yPre - yPost);
+
+        // Periodic boundary conditions
+        if (dx > 0.5 * grid_num_x2){
+            dx = dx - grid_num_x2;
+        };
+        if (dy > 0.5 * grid_num_x2){
+            dy = dy - grid_num_x2;
+        };
+
+        float dist = sqrt(dx * dx + dy * dy);
         value = dist * delay;
         """
     )
@@ -168,10 +148,10 @@ E_dist = L/n_side_E
 I_dist = L/n_side_I
 
 conduction_delay = 0.2 #mm/ms
-EE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_E)})})
-EI_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, {"d": init_var(calc_dist_resize, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_I)})})
-II_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_I)})})
-IE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, {"d": init_var(calc_dist_resize, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)})})
+EE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_E)})})
+EI_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, {"d": init_var(calc_dist, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_I)})})
+II_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_I)})})
+IE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, {"d": init_var(calc_dist, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)})})
 
 excitatory_postsynaptic_init = init_postsynaptic("ExpCurr", {"tau": 5.0})
 inhibitory_postsynaptic_init = init_postsynaptic("ExpCurr", {"tau": 10.0})
@@ -197,7 +177,7 @@ EE_syn_pop = model.add_synapse_population("EE", "SPARSE",
     #excitatory_weight_init, excitatory_postsynaptic_init,
     EE_synapse_init, excitatory_postsynaptic_init,
     #init_sparse_connectivity("FixedProbabilityNoAutapse", fixed_prob))
-    init_sparse_connectivity(fixed_number_post, {"num": int(K*EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)), "sigma_space": sigma/L*n_side_E, "grid_num_x": int(n_side_E)}))
+    init_sparse_connectivity(fixed_number_post, {"num": int(K*EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)), "sigma_space": sigma/L*n_side_E, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_E)}))
 
 EI_syn_pop = model.add_synapse_population("EI", "SPARSE",
     excitatory_pop, inhibitory_pop,
@@ -205,26 +185,23 @@ EI_syn_pop = model.add_synapse_population("EI", "SPARSE",
     EI_synapse_init, excitatory_postsynaptic_init,
     #init_sparse_connectivity("FixedProbability", fixed_prob))
     #init_sparse_connectivity("FixedNumberPostWithReplacement", {"num": 3000*0.2}))
-    init_sparse_connectivity(fixed_number_post_resize, {"num": int(K*(1-(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)))), "sigma_space": sigma/L*n_side_I, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_I)}))
-
+    init_sparse_connectivity(fixed_number_post, {"num": int(K*(1-(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)))), "sigma_space": sigma/L*n_side_I, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_I)}))
 II_syn_pop = model.add_synapse_population("II", "SPARSE",
     inhibitory_pop, inhibitory_pop,
     #inhibitory_weight_init, inhibitory_postsynaptic_init,
     II_synapse_init, inhibitory_postsynaptic_init,
     #init_sparse_connectivity("FixedProbabilityNoAutapse", fixed_prob))
     #init_sparse_connectivity("FixedNumberPostWithReplacement", {"num": 3000*0.2}))
-    init_sparse_connectivity(fixed_number_post, {"num": int(K*(1-(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)))), "sigma_space": sigma/L*n_side_I, "grid_num_x": int(n_side_I)}))
+    init_sparse_connectivity(fixed_number_post, {"num": int(K*(1-(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)))), "sigma_space": sigma/L*n_side_I, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_I)}))
     
-
 IE_syn_pop = model.add_synapse_population("IE", "SPARSE",
     inhibitory_pop, excitatory_pop,
     #inhibitory_weight_init, inhibitory_postsynaptic_init,
     IE_synapse_init, inhibitory_postsynaptic_init,
     #init_sparse_connectivity("FixedProbability", fixed_prob))
     #init_sparse_connectivity("FixedNumberPostWithReplacement", {"num": 3000*0.8}))
-    init_sparse_connectivity(fixed_number_post_resize, {"num": int(K*EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)), "sigma_space": sigma/L*n_side_E, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)}))
+    init_sparse_connectivity(fixed_number_post, {"num": int(K*EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)), "sigma_space": sigma/L*n_side_E, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)}))
 
-print(int((2*(400**2))**0.5 * (conduction_delay / model.dt)))
 EE_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
 EI_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
 II_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
