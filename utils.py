@@ -6,6 +6,7 @@ from typing import Optional
 from pygenn import SynapseMatrixType
 from typing import TYPE_CHECKING
 from ml_genn.connectivity import Connectivity
+from ml_genn.connectivity.sparse_base import SparseBase
 from ml_genn.utils.snippet import ConnectivitySnippet
 from ml_genn.utils.value import InitValue
 TYPE_CHECKING = True
@@ -29,23 +30,26 @@ StaticPulseDendriticDelayConstantWeight = create_weight_update_model(
         addToPostDelay(g, d);""")
 
 
-fixed_number_post = create_sparse_connect_init_snippet(
+fixed_number_post= create_sparse_connect_init_snippet(
     "fixed_number_post",
     params=[("num", "unsigned int"), ("sigma_space", "float"), ("grid_num_x", "unsigned int"), ("grid_num_x2", "unsigned int")],
     row_build_code=
         """
-        const float ratio = (float)(grid_num_x2-1) / (float)(grid_num_x-1);
+        const float ratio = (float)(grid_num_x2 -1 ) / (float)(grid_num_x-1);
         const float xPre = (id_pre % grid_num_x) * ratio;
         const float yPre = (id_pre / grid_num_x) * ratio;
         int count = num;
         while(count > 0) {
-            const float distanceX = (float)gennrand_normal() * sigma_space;
-            const float distanceY = (float)gennrand_normal() * sigma_space;
+            const float distanceX = gennrand_normal() * sigma_space;
+            const float distanceY = gennrand_normal() * sigma_space;
             int xPost = (int)round(xPre + distanceX);
             int yPost = (int)round(yPre + distanceY);
-            if((xPost < 0 || xPost >= grid_num_x2 || yPost < 0 || yPost >= grid_num_x2)){
-                continue;
-            }
+            // periodic wrapping
+            while(xPost < 0) xPost += grid_num_x2;
+            while(xPost >= grid_num_x2) xPost -= grid_num_x2;
+            while(xPost < 0) xPost += grid_num_x2;
+            while(yPost < 0) yPost += grid_num_x2;
+            while(yPost >= grid_num_x2) yPost -= grid_num_x2;
             count--;
             const int id_post = (yPost * grid_num_x2) + xPost;
             addSynapse(id_post);
@@ -65,7 +69,18 @@ calc_dist = create_var_init_snippet(
         const float yPre = (id_pre / grid_num_x) * ratio;
         const float xPost = id_post % grid_num_x2;
         const float yPost = id_post / grid_num_x2;
-        float dist = (float)sqrt(pow(xPre - xPost, 2) + pow(yPre - yPost, 2));
+        float dx = fabs(xPre - xPost);
+        float dy = fabs(yPre - yPost);
+
+        // Periodic boundary conditions
+        if (dx > 0.5 * grid_num_x2){
+            dx = dx - grid_num_x2;
+        };
+        if (dy > 0.5 * grid_num_x2){
+            dy = dy - grid_num_x2;
+        };
+
+        float dist = sqrt(dx * dx + dy * dy);
         value = dist * delay_vel;
         """
     )
@@ -97,7 +112,7 @@ class SpatialDelay(Initializer):
     def __repr__(self):
         return f"(SpatialDelay) Delay Vel: {self.delay_vel}, Grid Num X: {self.grid_num_x}, Grid Num X2: {self.grid_num_x2}"
 
-class TopoGraphic(Connectivity):
+class TopoGraphic(SparseBase):
     """Topographic connectivity with fixed number of post-synaptic connections.
     
     Creates spatially localized random connections where each neuron connects to
@@ -131,14 +146,13 @@ class TopoGraphic(Connectivity):
 
     def get_snippet(self, connection: Connection,
                     supported_matrix_type: SupportedMatrixType) -> ConnectivitySnippet:
-        snippet = fixed_number_post
         params = {
             "num": self.num,
             "sigma_space": self.sigma_space,
             "grid_num_x": self.grid_num_x,
             "grid_num_x2": self.grid_num_x2
         }
-        conn_init = init_sparse_connectivity(snippet, params)
+        conn_init = init_sparse_connectivity(fixed_number_post, params)
         return ConnectivitySnippet(
             snippet=conn_init,
             matrix_type=SynapseMatrixType.SPARSE,
