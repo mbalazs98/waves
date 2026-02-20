@@ -8,13 +8,14 @@ from pygenn import (GeNNModel, VarLocation, init_var,
 
 
 # Parameters
-TIMESTEP = 1.0
+time_div = 10
+TIMESTEP = 1.0 / time_div
 NUM_NEURONS = 1_012_500
 
 
 K = 3000
 
-conduction_delay = 30 #μm/ms
+conduction_delay = 200 #μm/ms
 
 
 EXCITATORY_INHIBITORY_RATIO = 4.0
@@ -244,7 +245,7 @@ fig, axes = plt.subplots(3, sharex=True, figsize=(20, 10))
 
 # Define some bins to calculate spike rates
 bin_size = 10.0
-rate_bins = np.arange(0, 1000.0, bin_size)
+rate_bins = np.arange(0, 1000.0/ time_div, bin_size)
 rate_bin_centres = rate_bins[:-1] + (bin_size / 2.0)
 
 # Plot excitatory and inhibitory spikes on first axis
