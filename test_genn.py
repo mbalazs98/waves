@@ -14,6 +14,7 @@ NUM_NEURONS = 1_012_500
 
 K = 3000
 
+conduction_delay = 30 #μm/ms
 
 
 EXCITATORY_INHIBITORY_RATIO = 4.0
@@ -26,16 +27,16 @@ PROBABILITY_CONNECTION_I = K*(1-(EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIB
 
 SCALE_E = (4000.0 / NUM_NEURONS) * (0.02 / (PROBABILITY_CONNECTION_E))
 SCALE_I = (4000.0 / NUM_NEURONS) * (0.02 / (PROBABILITY_CONNECTION_I))
-EXCITATORY_WEIGHT = 4.0E-3 * SCALE_E / 10
-INHIBITORY_WEIGHT = -51.0E-3 * SCALE_I / 10
+EXCITATORY_WEIGHT = 4.0E-3 * SCALE_E * 2
+INHIBITORY_WEIGHT = -51.0E-3 * SCALE_I * 2
 model = GeNNModel("float", "va_benchmark")
 model.dt = TIMESTEP
 model.default_narrow_sparse_ind_enabled = True
 
 
 lif_init = {"V": init_var("Uniform", {"min": 0, "max": 1}), "RefracTime": 0.0}
-lif_params = {"C": 1.0, "TauM": 20.0, "Vrest": 0.0, "Vreset": 0.0, "Vthresh" : 1.0,
-                      "Ioffset": 0.051, "TauRefrac": 0.0}
+lif_params = {"C": 20.0, "TauM": 20.0, "Vrest": 0.0, "Vreset": 0.0, "Vthresh" : 1.0,
+                      "Ioffset": 0.051*20, "TauRefrac": 0.0}
 
 poisson_model = create_neuron_model(
     "poisson",
@@ -147,17 +148,17 @@ n_side_I = int(np.ceil(np.sqrt(NUM_INHIBITORY)))
 E_dist = L/n_side_E
 I_dist = L/n_side_I
 
-conduction_delay = 0.2 #mm/ms
-EE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_E)})})
-EI_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, {"d": init_var(calc_dist, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_I)})})
-II_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": I_dist*conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_I)})})
-IE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, {"d": init_var(calc_dist, {"delay": E_dist*conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)})})
+
+EE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": E_dist/conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_E)})})
+EI_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": EXCITATORY_WEIGHT}, {"d": init_var(calc_dist, {"delay": I_dist/conduction_delay, "grid_num_x": int(n_side_E), "grid_num_x2": int(n_side_I)})})
+II_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, { "d": init_var(calc_dist, {"delay": I_dist/conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_I)})})
+IE_synapse_init = init_weight_update(StaticPulseDendriticDelayConstantWeight, {"g": INHIBITORY_WEIGHT}, {"d": init_var(calc_dist, {"delay": E_dist/conduction_delay, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)})})
 
 excitatory_postsynaptic_init = init_postsynaptic("ExpCurr", {"tau": 5.0})
 inhibitory_postsynaptic_init = init_postsynaptic("ExpCurr", {"tau": 10.0})
 
 
-start_loc_x = np.random.randint(0, n_side_E-int(np.sqrt(input_num)))
+'''start_loc_x = np.random.randint(0, n_side_E-int(np.sqrt(input_num)))
 start_loc_y = np.random.randint(0, n_side_E-int(np.sqrt(input_num)))
 
 InputE_syn_pop = model.add_synapse_population("InputE", "SPARSE",
@@ -170,7 +171,7 @@ InputI_syn_pop = model.add_synapse_population("InputI", "SPARSE",
     input_pop2, inhibitory_pop,
     init_weight_update("StaticPulseConstantWeight", {"g": 0.0}),
     init_postsynaptic("ExpCurr", {"tau": 5.0}),
-    init_sparse_connectivity(input_number_post, {"num": int(input_num/2), "start_loc_x": start_loc_x/2, "start_loc_y": start_loc_y/2, "grid_num_x": int(n_side_I)}))
+    init_sparse_connectivity(input_number_post, {"num": int(input_num/2), "start_loc_x": start_loc_x/2, "start_loc_y": start_loc_y/2, "grid_num_x": int(n_side_I)}))'''
 
 EE_syn_pop = model.add_synapse_population("EE", "SPARSE",
     excitatory_pop, excitatory_pop,
@@ -202,10 +203,11 @@ IE_syn_pop = model.add_synapse_population("IE", "SPARSE",
     #init_sparse_connectivity("FixedNumberPostWithReplacement", {"num": 3000*0.8}))
     init_sparse_connectivity(fixed_number_post, {"num": int(K*EXCITATORY_INHIBITORY_RATIO/(1+EXCITATORY_INHIBITORY_RATIO)), "sigma_space": sigma/L*n_side_E, "grid_num_x": int(n_side_I), "grid_num_x2": int(n_side_E)}))
 
-EE_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
-EI_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
-II_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
-IE_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 * (conduction_delay / model.dt))
+print(int((2*(400**2))**0.5 / (conduction_delay * model.dt)))
+EE_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 / (conduction_delay * model.dt))
+EI_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 / (conduction_delay * model.dt))
+II_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 / (conduction_delay * model.dt))
+IE_syn_pop.max_dendritic_delay_timesteps = int((2*(400**2))**0.5 / (conduction_delay * model.dt))
 print("Building Model")
 model.build()
 print("Loading Model")
@@ -255,7 +257,7 @@ axes[1].plot(rate_bin_centres, exc_rate * (1000.0 / bin_size) * (1.0 / NUM_EXCIT
 
 # Plot inhibitory rates on third axis
 inh_rate = np.histogram(inh_spike_times, bins=rate_bins)[0]
-axes[2].plot(rate_bin_centres, inh_rate * (1000.0 / bin_size) * (1.0 / NUM_INHIBITORY))
+axes[2].plot(rate_bin_centres, inh_rate * (100.0 / bin_size) * (1.0 / NUM_INHIBITORY))
 
 # Label axes
 axes[0].set_ylabel("Neuron ID")
@@ -264,3 +266,74 @@ axes[2].set_ylabel("Inhibitory rate [Hz]")
 axes[2].set_xlabel("Time [ms]");
 
 plt.savefig("wave.png")
+
+side = int(np.sqrt(NUM_EXCITATORY))  # should be 900
+print(side)  # 900
+
+crop = side // 6          # 900 // 6 = 150
+r0, r1 = crop, side - crop
+c0, c1 = crop, side - crop
+
+cropped_side = r1 - r0    # should be 600
+
+
+exc_spike_times = np.array(exc_spike_times)  # shape (n_spikes,)
+exc_spike_ids   = np.array(exc_spike_ids)    # shape (n_spikes,)
+
+t_min = exc_spike_times.min()
+t_max = exc_spike_times.max()
+
+#dt = 10.0  # ms per frame (adjust to taste)
+time_bins = np.arange(t_min, t_max + model.dt*10, model.dt*10)
+n_frames = len(time_bins) - 1
+
+frames = np.zeros((n_frames, cropped_side, cropped_side), dtype=np.float32)
+
+
+# Find which frame each spike belongs to
+frame_indices = np.digitize(exc_spike_times, time_bins) - 1
+
+valid = (frame_indices >= 0) & (frame_indices < n_frames)
+frame_indices = frame_indices[valid]
+ids = exc_spike_ids[valid]
+
+rows = ids // side
+cols = ids % side
+
+# Keep only spikes inside central region
+inside = (rows >= r0) & (rows < r1) & (cols >= c0) & (cols < c1)
+
+rows = rows[inside] - r0   # shift so cropped grid starts at 0
+cols = cols[inside] - c0
+frame_indices = frame_indices[inside]
+
+# Accumulate spikes into frames
+for f, r, c in zip(frame_indices, rows, cols):
+    frames[f, r, c] += 1
+
+# Log scale helps a lot with spike data
+frames = np.log1p(frames)
+
+# Normalize to [0, 1]
+frames /= frames.max()
+
+import matplotlib.pyplot as plt
+import imageio
+
+gif_path = "spiking_activity.gif"
+images = []
+
+for i in range(n_frames):
+    print(i)
+    fig, ax = plt.subplots(figsize=(3, 3))
+    ax.imshow(frames[i], cmap="hot", vmin=0, vmax=1)
+    ax.set_title(f"Time: {time_bins[i]:.1f}–{time_bins[i+1]:.1f} ms")
+    ax.axis("off")
+
+    fig.canvas.draw()
+    image = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
+    images.append(image)
+
+    plt.close(fig)
+
+imageio.mimsave(gif_path, images, duration=0.1, loop=10 )  # seconds per frame
