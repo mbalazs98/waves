@@ -26,6 +26,9 @@ from argparse import ArgumentParser
 from ml_genn.communicators import MPI
 import json
 
+from hashlib import md5
+import os
+
 parser = ArgumentParser()
 parser.add_argument("--num_hidden", type=int, default=128, help="Conduction velocity")
 parser.add_argument("--k", type=int, default=3000, help="Conduction velocity")
@@ -176,7 +179,7 @@ with network:
 
 
 
-max_example_timesteps = int(np.ceil((latest_spike_time + 100)))
+max_example_timesteps = 2000#int(np.ceil((latest_spike_time + 100)))
 
 callbacks = []
 if communicator.rank == 0:
@@ -193,26 +196,29 @@ compiler = EventPropCompiler(example_timesteps=max_example_timesteps,
                                 rng_seed=args.seed)
 optimisers = {inputE: {"weight": Adam(0.001)},
              EO: {"weight": Adam(0.001)}}
-compiled_net = compiler.compile(network, optimisers=optimisers)
+model_name = (f"classifier_train_{md5(unique_suffix.encode()).hexdigest()}"
+                  if os.name == "nt" else f"classifier_train_{unique_suffix}")
+compiled_net = compiler.compile(network,name=model_name,  optimisers=optimisers)
 
-
+results_dic = {}
 acc = 0
 early_stop = 10
 with compiled_net:
     if communicator.rank == 0:
-        compiled_net.save_connectivity(("best"), serialiser)
+        compiled_net.save_connectivity(("best",), serialiser)
     for i in range(NUM_EPOCHS):
         metrics, _  = compiled_net.train({input: spikes},
-                                        {output: labels}, callbacks=callbacks, num_epochs=1, start_epoch=start_epoch-1)
+                                        {output: labels}, callbacks=callbacks, num_epochs=1, start_epoch=i)
 
         if metrics[output].result > acc:
                 acc = metrics[output].result
                 results_dic["train_acc"] = str(metrics[output].result)
                 results_dic["epoch"] = str(i)
                 early_stop = 10
-                with open(f"results/lip_{communicator.rank}_{unique_suffix}.json", 'w') as f:
-                        json.dump(results_dic, f, indent=4)
-                compiled_net.save(("best",), serialiser)
+                if communicator.rank == 0:
+                    with open(f"results/lip_{communicator.rank}_{unique_suffix}.json", 'w') as f:
+                            json.dump(results_dic, f, indent=4)
+                    compiled_net.save(("best",), serialiser)
                 
         else:
                 early_stop -= 1
